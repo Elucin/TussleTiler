@@ -1,0 +1,4 @@
+dist/
+build/
+build.bat
+AT_MapMaker.spec

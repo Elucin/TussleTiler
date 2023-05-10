@@ -3,69 +3,43 @@ from tkinter import Menu, Label, Frame, Entry, simpledialog
 import tkinter.tix as tix
 import csv
 from tkinter import filedialog as fd
-from PIL import Image
+from PIL import Image, ImageTk
+from math import sqrt, cos, sin, radians
 
-color_map = {
-    "#FF00FF": 0, # Spawn
-    "#D9EAD3": 1, # Flat
-    "#D2C87C": 2, # Ground
-    "#93C47D": 3, # Ground + Int
-    "#A4C2F4": 4, # Water
-    "#3C78D8": 5, # Lower
-    "#7D7060": 6, # Higher
-    "#B3A89B": 7, # Obstacle
-    "#B7E1CD": 8, # Standard
-    "#EA9999": 9, # Maybe Enemy
-    "#CC0000": 10, # Yes Enemy
-    "#E69138": 11, # Random
-    "#46BDC6": 12, # Bridge
-}
+NUM_ICONS = 25
+icons = [Image.open(f'icons/{i}.png').convert('RGBA') for i in range(NUM_ICONS)]
 
-tile_map = {
-    0: "#FF00FF", # Spawn
-    1: "#D9EAD3", # Flat
-    2: "#D2C87C", # Ground
-    3: "#93C47D", # Ground + Int
-    4: "#A4C2F4", # Water
-    5: "#3C78D8", # Lower
-    6: "#7D7060", # Higher
-    7: "#B3A89B", # Obstacle
-    8: "#B7E1CD", # Standard
-    9: "#EA9999", # Maybe Enemy
-    10: "#CC0000", # Yes Enemy
-    11: "#E69138", # Random
-    12: "#46BDC6", # Bridge
-}
+def rotate_vector(v, angle):
+    angle = radians(angle)
+    return ((v[0] * cos(angle)) - (v[1] * sin(angle)), (v[0] * sin(angle)) + (v[1] * cos(angle)))
 
-colors = {
-    "#FF00FF": "Spawn",
-    "#D9EAD3": "Flat",
-    "#D2C87C": "Ground",
-    "#93C47D": "Ground + Int",
-    "#A4C2F4": "Water",
-    "#3C78D8": "Lower",
-    "#7D7060": "Higher",
-    "#B3A89B": "Obstacle",
-    "#B7E1CD": "Standard",
-    "#EA9999": "Maybe Enemy",
-    "#CC0000": "Yes Enemy",
-    "#E69138": "Random",
-    "#46BDC6": "Bridge",
-}
-
-def get_closest_color(pixel):
-    closest_dist = None
-    closest = ''
-    for c in color_map:
-        c = c.lstrip('#')
-        c_rgb = tuple(int(c[i:i+2], 16) for i in (0, 2, 4))
-        dist = (pixel[0] - c_rgb[0]) ** 2 + (pixel[1] - c_rgb[1]) ** 2 + (pixel[2] - c_rgb[2]) ** 2
-        if closest_dist is None or dist < closest_dist:
-            closest_dist = dist
-            closest = '#' + c
-            if closest_dist == 0:
-                return closest
-    return closest
+tile_names = [
+    "Spawn",
+    "Flat",
+    "Ground",
+    "No Obstacle",
+    "Water",
+    "Low Ground",
+    "High Ground",
+    "Obstacle",
+    "Standard Chance Tile",
+    "Possible Enemy",
+    "Guaranteed Enemy",
+    "Totally Random",
+    "Possible Water Crossing",
+    "Bridge",
+    "Wall Corner",
+    "Wall X",
+    "Wall Y",
+    "Garrison",
+    "Enemy Spawner",
+    "Minefield",
+    "Rough",
+    "Forest",
+    "Rocks",
+    "Cliff",
+    "Canyon",
+]
 
 class PaintApp:
     def __init__(self, master):
@@ -74,52 +48,87 @@ class PaintApp:
 
         self.grid_size = (25, 25)
         self.cell_size = 30
-        self.selected_color = "#D9EAD3"
-        self.default_color = "#D9EAD3"
+        self.half_cell_size = 15
+        self.selected_tile = None
+        self.default_tile = 1
         self.selected_button = None
+        self.zoom_scale = 4
 
         self.create_menu(master)
 
-        self.canvas = tix.Canvas(master, width=self.grid_size[0] * self.cell_size, height=self.grid_size[1] * self.cell_size)
-        self.canvas.pack(side="left", pady=10)
+        # Create a Frame to hold the Canvas and the scrollbars
+        self.canvas_frame = Frame(master)
+        self.canvas_frame.pack(side="left", pady=10, padx=10)
 
-        self.create_palette_section(master)
+        # Create the horizontal and vertical scrollbars
+        self.x_scroll = tk.Scrollbar(self.canvas_frame, orient="horizontal")
+        self.x_scroll.pack(side="bottom", fill="x")
+        self.y_scroll = tk.Scrollbar(self.canvas_frame, orient="vertical")
+        self.y_scroll.pack(side="right", fill="y")
 
-        self.create_grid()
+        self.canvas = tix.Canvas(self.canvas_frame, width=self.grid_size[0] * self.cell_size,
+                                  height=self.grid_size[1] * self.cell_size,
+                                  xscrollcommand=self.x_scroll.set,
+                                  yscrollcommand=self.y_scroll.set)
+        self.canvas.pack(side="left")
+
+        # Configure the scrollbars to scroll the Canvas
+        self.x_scroll.config(command=self.canvas.xview)
+        self.y_scroll.config(command=self.canvas.yview)
 
         self.canvas.bind("<B1-Motion>", self.paint_cell)
         self.canvas.bind("<Button-1>", self.paint_cell)
+        self.canvas.bind("<Button-3>", self.start_pan)
+        self.canvas.bind("<B3-Motion>", self.pan_canvas)
+        self.canvas.bind("<ButtonRelease-3>", self.end_pan)
+        self.pan_start_x = None
+        self.pan_start_y = None
+        self.canvas.bind("<MouseWheel>", self.zoom)
 
-        # Initialize the color_grid with default color
-        self.color_grid = [[self.default_color for _ in range(self.grid_size[0])] for _ in range(self.grid_size[1])]
+        # Initialize the tile_grid with default tile
+        self.tile_grid = [[self.default_tile for _ in range(self.grid_size[0])] for _ in range(self.grid_size[1])]
 
+        self.icons = [ImageTk.PhotoImage(i.resize((int(sqrt(2 * self.cell_size ** 2) / 2), int(sqrt(2 * self.cell_size ** 2) / 2))).rotate(45, expand=1)) for i in icons]
+        self.button_icons = [ImageTk.PhotoImage(i.resize((int(sqrt(2 * self.cell_size ** 2) / 2), int(sqrt(2 * self.cell_size ** 2) / 2))).rotate(45, expand=1)) for i in icons]
+        self.create_palette_section(master)
+        self.create_grid() 
+        
     def create_grid(self):
-        for i in range(0, self.grid_size[0] * self.cell_size, self.cell_size):
+
+        x_ini = self.grid_size[0] * self.half_cell_size
+        y_ini = self.half_cell_size
+        for _ in range(0, self.grid_size[0] * self.cell_size, self.cell_size):
+            x_ini = x_ini + self.half_cell_size 
+            y_ini = y_ini + self.half_cell_size
             for j in range(0, self.grid_size[1] * self.cell_size, self.cell_size):
-                self.canvas.create_rectangle(i, j, i + self.cell_size, j + self.cell_size, fill=self.default_color)
+                x = x_ini - j / 2
+                y = y_ini + j / 2
+                
+                self.canvas.create_image(x, y, image=self.icons[self.default_tile])
 
     def create_palette_section(self, master):
-        palette_frame = Frame(master, width=100, height=650)
+        palette_frame = Frame(master)
         palette_frame.pack_propagate(0)
-        palette_frame.pack(before=self.canvas, side="left", pady=10)
+        palette_frame.pack(before=self.canvas, side="left", pady=10, padx=10)
 
-        self.palette_label = Label(palette_frame, text="Flat")
-        self.palette_label.pack(pady=5)
+        self.palette_label = Label(palette_frame, text="Flat", wraplength=75, justify="center")
+        # self.palette_label.pack(pady=5)
+        self.palette_label.grid(column=0, row=0, columnspan=2, rowspan=2)
 
-        self.create_color_buttons(palette_frame)
+        self.create_tile_buttons(palette_frame)
 
-    def create_color_buttons(self, frame):
-        for color in colors.keys():
+    def create_tile_buttons(self, frame):
+        for index in range(NUM_ICONS):
             tip = tix.Balloon(self.master)
-            button = tk.Button(frame, bg=color, width=4, height=2, text=color_map.get(color), borderwidth=1)
-            button.config(command=lambda c=color,b=button: self.select_color(c, b))
-            button.pack(side="top", padx=2, pady=2)
-            tip.bind_widget(button, balloonmsg=colors.get(color))
+            button = tk.Button(frame, width=32, height=32, text=index, borderwidth=1)
+            button.config(command=lambda i=index, b=button: self.select_tile(i, b), image=self.button_icons[index])
 
-            if color == "#D9EAD3":
-                self.select_color(color, button)
-                # self.selected_button = button
-                # button.config(highlightthickness=2, highlightbackground="red", highlightcolor="red", bd=10, borderwidth=2)
+            button.grid(column=index % 2, row=index//2 + 2)
+            tip.bind_widget(button, balloonmsg=tile_names[index])
+
+            if index == self.default_tile:
+                self.select_tile(index, button)
+                self.selected_button = button
 
     def create_menu(self, master):
         menu = Menu(master)
@@ -129,28 +138,72 @@ class PaintApp:
         menu.add_cascade(label="File", menu=file_menu)
         file_menu.add_command(label="Export to CSV", command=self.export_to_csv)
         file_menu.add_command(label="Import From CSV", command=self.import_from_csv)
-        file_menu.add_command(label="Import From Image", command=self.import_from_img)
+        # file_menu.add_command(label="Import From Image", command=self.import_from_img)
 
         edit_menu = Menu(menu, tearoff=False)
         menu.add_cascade(label="Edit", menu=edit_menu)
         edit_menu.add_command(label="Set Grid Size", command=self.set_grid_size)
 
-    def select_color(self, color, button):
-        self.selected_color = color
-        self.palette_label.configure(text = colors.get(color))
-        button.config(highlightthickness=2, highlightbackground="red", highlightcolor="red", borderwidth=3)
+    def select_tile(self, index, button):
+        if self.selected_tile == index:
+            return
+        self.selected_tile = index
+        self.palette_label.configure(text = tile_names[index])
+        button.config(highlightthickness=0, borderwidth=3)
         if self.selected_button is not None:
             self.selected_button.config(borderwidth=1, highlightthickness=0)
         self.selected_button = button
 
     def paint_cell(self, event):
-        x = (event.x // self.cell_size) * self.cell_size
-        y = (event.y // self.cell_size) * self.cell_size
-        self.canvas.create_rectangle(x, y, x + self.cell_size, y + self.cell_size, fill=self.selected_color)
+        # Get the current scroll position
+        x_scroll = self.canvas.canvasx(0)
+        y_scroll = self.canvas.canvasy(0)
 
-        # Update the color_grid
+        # Calculate the position of the cell in the grid
+        
+        # Get the relative position of 0,0
+        x_ini = self.grid_size[0] * self.half_cell_size + self.half_cell_size
+        y_ini = self.half_cell_size
+        # int(sqrt(2 * self.cell_size ** 2) / 2) / 2
+        side = sqrt((self.half_cell_size ** 2) * 2)
+        
+        # Determine the length of the vector from 0,0 to mouse location.
+        v1_length = sqrt((event.x + x_scroll - x_ini) ** 2 + (event.y + y_scroll - y_ini) ** 2)
+
+        v1 = ((event.x + x_scroll - x_ini) / v1_length, (event.y + y_scroll - y_ini) / v1_length)
+
+        v2 = rotate_vector(v1, -45)
+        v2 = (v2[0] * v1_length, v2[1] * v1_length)
+        v2_ = (int(v2[0] // side), int(v2[1]  // side))
+        
+        v2 = (x_ini + v2_[0] * self.half_cell_size - v2_[1] * self.half_cell_size, 
+              y_ini + v2_[0] * self.half_cell_size + v2_[1] * self.half_cell_size + self.half_cell_size)
+
+        # self.canvas.delete("arrow")
+        # self.canvas.create_line(x_ini, 
+        #                         y_ini, 
+        #                         x_ini + v2_[0] * self.half_cell_size, 
+        #                         y_ini + v2_[0] * self.half_cell_size, 
+        #                         arrow=tk.LAST, tags="arrow")
+
+        # self.canvas.create_line(x_ini + v2_[0] * self.half_cell_size, 
+        #                         y_ini + v2_[0] * self.half_cell_size, 
+        #                         x_ini + v2_[0] * self.half_cell_size - v2_[1] * self.half_cell_size, 
+        #                         y_ini + v2_[0] * self.half_cell_size + v2_[1] * self.half_cell_size, 
+        #                         arrow=tk.LAST, tags="arrow")
+        
+        if any([v2_[0] not in range(self.grid_size[0]), v2_[1] not in range(self.grid_size[1])]):
+            return
+        
+        if self.tile_grid[v2_[0]][v2_[1]] == self.selected_tile:
+            return
+
+        self.canvas.create_image(*v2, image=self.icons[self.selected_tile])
+        self.canvas.update()
+        
+        # Update the tile_grid
         try:
-            self.color_grid[event.y // self.cell_size][event.x // self.cell_size] = self.selected_color
+            self.tile_grid[v2_[0]][v2_[1]] = self.selected_tile
         except IndexError:
             pass
 
@@ -186,11 +239,44 @@ class PaintApp:
 
     def update_grid_size(self, x, y):
         self.grid_size = (x, y)
-        self.cell_size = int(30 / ((x if x >= y else y) / 25))
-        self.cell_size = self.cell_size if self.cell_size >= 10 else 10
+        self.canvas.delete("all")
         self.canvas.config(width=self.grid_size[0] * self.cell_size, height=self.grid_size[1] * self.cell_size)
         self.create_grid()
-        self.color_grid = [[self.default_color for _ in range(self.grid_size[0])] for _ in range(self.grid_size[1])]
+        self.tile_grid = [[self.default_tile for _ in range(self.grid_size[0])] for _ in range(self.grid_size[1])]
+
+    def zoom(self, event):
+        
+        if event.delta > 0:
+            self.cell_size = min(self.cell_size + self.zoom_scale, 100)
+        else:
+            self.cell_size = max(self.cell_size - self.zoom_scale, 6)
+        self.half_cell_size = self.cell_size / 2
+        self.canvas.delete("all")
+        self.canvas.config(scrollregion=(0, 0, self.grid_size[0] * self.cell_size, self.grid_size[1] * self.cell_size))
+        x_ini = self.grid_size[0] * self.half_cell_size
+        y_ini = self.half_cell_size
+        self.icons = [ImageTk.PhotoImage(i.resize((int(sqrt(2 * self.cell_size ** 2) / 2), int(sqrt(2 * self.cell_size ** 2) / 2))).rotate(45, expand=1)) for i in icons]
+        for row in self.tile_grid:
+            x_ini += self.half_cell_size 
+            y_ini += self.half_cell_size
+            for j, cell_tile_index in enumerate(row):
+                x = x_ini - j * self.half_cell_size
+                y = y_ini + j * self.half_cell_size
+                
+                self.canvas.create_image(x, y, image=self.icons[cell_tile_index])
+
+    def start_pan(self, event):
+        self.pan_start_x = event.x
+        self.pan_start_y = event.y
+        self.canvas.scan_mark(event.x, event.y)
+
+    def pan_canvas(self, event):
+        if self.pan_start_x is not None and self.pan_start_y is not None:
+            self.canvas.scan_dragto(event.x, event.y, gain=1)
+
+    def end_pan(self, event):
+        self.pan_start_x = None
+        self.pan_start_y = None
 
     def export_to_csv(self):
         try:
@@ -202,10 +288,10 @@ class PaintApp:
         with open(filename, mode="w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow([''] + [f'X{x}' for x in range(1,self.grid_size[0]+1)])
-            for i,row in enumerate(self.color_grid, 1):
-                writer.writerow([f'Y{i}'] + [color_map.get(r, 1) for r in row])
+            for i,row in enumerate(self.tile_grid, 1):
+                writer.writerow([f'Y{i}'] + row)
 
-        print(f"Color grid exported to {filename}")
+        print(f"Tile grid exported to {filename}")
 
     def import_from_csv(self):
         filename = fd.askopenfilename(filetypes=(('CSV Map', '*.csv'),))
@@ -215,43 +301,22 @@ class PaintApp:
             reader = csv.reader(file, delimiter=",")
             rows = list(reader)[1:]
             self.update_grid_size(len(rows[0])- 1, len(rows))
-            for j,row in enumerate(rows):
-                for i,tile_num in enumerate(row[1:]):
-                    cell_color = tile_map.get(int(tile_num), "#D9EAD3")
-                    x = i * self.cell_size
-                    y = j * self.cell_size
-                    self.canvas.create_rectangle(x, y, x + self.cell_size, y + self.cell_size, fill=cell_color)
+            x_ini = self.grid_size[0] * self.half_cell_size
+            y_ini = self.half_cell_size
+            for i, row in enumerate(rows):
+                x_ini += self.half_cell_size 
+                y_ini += self.half_cell_size
+                for j, cell_tile_index in enumerate(row[1:]):
+                    x = x_ini - j * self.half_cell_size
+                    y = y_ini + j * self.half_cell_size
+                    
+                    self.canvas.create_image(x, y, image=self.icons[int(cell_tile_index)])
 
-                    # Update the color_grid
+                    # Update the tile grid
                     try:
-                        self.color_grid[j][i] = cell_color
+                        self.tile_grid[i][j] = int(cell_tile_index)
                     except IndexError:
                         pass
-
-    def import_from_img(self):
-        filename = fd.askopenfilename(filetypes=(('All', '*.jpg;*.png;*.bmp'), ('JPEG', '*.jpg'), ('PNG', '*.png'), ("BMP", "*.bmp"),))
-        if not filename:
-            return
-        im = Image.open(filename)
-        pix = im.load()
-
-        x_size, y_size = im.size
-        self.update_grid_size(x_size, y_size)
-        for j in range(0,y_size):
-            for i in range(0, x_size):
-                pix_color = pix[i,j]
-                if isinstance(pix_color, int):
-                    pix_color = (pix_color, pix_color, pix_color, pix_color)
-                cell_color = get_closest_color(pix_color[:3])
-                x = i * self.cell_size
-                y = j * self.cell_size
-                self.canvas.create_rectangle(x, y, x + self.cell_size, y + self.cell_size, fill=cell_color)
-
-                # Update the color_grid
-                try:
-                    self.color_grid[j][i] = cell_color
-                except IndexError:
-                    pass
 
 if __name__ == "__main__":
     root = tix.Tk()

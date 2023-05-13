@@ -58,7 +58,7 @@ class PaintApp:
 
         # Create a Frame to hold the Canvas and the scrollbars
         self.canvas_frame = Frame(master)
-        self.canvas_frame.pack(side="left", pady=10, padx=10)
+        self.canvas_frame.pack(padx=10, fill="both", anchor="center")
 
         # Create the horizontal and vertical scrollbars
         self.x_scroll = tk.Scrollbar(self.canvas_frame, orient="horizontal")
@@ -66,11 +66,13 @@ class PaintApp:
         self.y_scroll = tk.Scrollbar(self.canvas_frame, orient="vertical")
         self.y_scroll.pack(side="right", fill="y")
 
-        self.canvas = tix.Canvas(self.canvas_frame, width=self.grid_size[0] * self.cell_size,
+        self.canvas = tix.Canvas(self.canvas_frame, 
+                                 # width=self.grid_size[0] * self.cell_size,
                                   height=self.grid_size[1] * self.cell_size,
                                   xscrollcommand=self.x_scroll.set,
                                   yscrollcommand=self.y_scroll.set)
-        self.canvas.pack(side="left")
+
+        self.canvas.pack(fill="both", anchor="center")
 
         # Configure the scrollbars to scroll the Canvas
         self.x_scroll.config(command=self.canvas.xview)
@@ -105,6 +107,7 @@ class PaintApp:
                 y = y_ini + j / 2
                 
                 self.canvas.create_image(x, y, image=self.icons[self.default_tile])
+        self.canvas.update()
 
     def create_palette_section(self, master):
         palette_frame = Frame(master)
@@ -252,7 +255,13 @@ class PaintApp:
             self.cell_size = max(self.cell_size - self.zoom_scale, 6)
         self.half_cell_size = self.cell_size / 2
         self.canvas.delete("all")
-        self.canvas.config(scrollregion=(0, 0, self.grid_size[0] * self.cell_size, self.grid_size[1] * self.cell_size))
+        self.canvas.config(# width = self.grid_size[0] * self.cell_size, 
+                           # height = self.grid_size[1] * self.cell_size, 
+                           scrollregion=(self.grid_size[0] * self.cell_size * - 0.5, 
+                                         self.grid_size[1] * self.cell_size * -0.5, 
+                                         self.grid_size[0] * self.cell_size * 1.5, 
+                                         self.grid_size[1] * self.cell_size * 1.5))
+        
         x_ini = self.grid_size[0] * self.half_cell_size
         y_ini = self.half_cell_size
         self.icons = [ImageTk.PhotoImage(i.resize((int(sqrt(2 * self.cell_size ** 2) / 2), int(sqrt(2 * self.cell_size ** 2) / 2))).rotate(45, expand=1)) for i in icons]

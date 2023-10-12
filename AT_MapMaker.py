@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import Menu, Label, Frame, Entry, simpledialog
+from tkinter import Menu, Label, Frame, Entry, simpledialog, Text
 import tkinter.tix as tix
 import csv
 from tkinter import filedialog as fd
@@ -53,7 +53,8 @@ class PaintApp:
         self.default_tile = 1
         self.selected_button = None
         self.zoom_scale = 4
-
+        self.map_desc = """<Map Name> by <Author>
+A custom Armored Tussle map."""
         self.create_menu(master)
 
         # Create a Frame to hold the Canvas and the scrollbars
@@ -99,14 +100,15 @@ class PaintApp:
 
         x_ini = self.grid_size[0] * self.half_cell_size
         y_ini = self.half_cell_size
-        for _ in range(0, self.grid_size[0] * self.cell_size, self.cell_size):
+        for i in range(0, self.grid_size[0] * self.cell_size, self.cell_size):
             x_ini = x_ini + self.half_cell_size 
             y_ini = y_ini + self.half_cell_size
             for j in range(0, self.grid_size[1] * self.cell_size, self.cell_size):
                 x = x_ini - j / 2
                 y = y_ini + j / 2
                 
-                self.canvas.create_image(x, y, image=self.icons[self.default_tile])
+                self.canvas.delete(f"{int(i / self.cell_size)},{int(j / self.cell_size)}")
+                self.canvas.create_image(x, y, image=self.icons[self.default_tile], tags=f"{int(i / self.cell_size)},{int(j / self.cell_size)}")
         self.canvas.update()
 
     def create_palette_section(self, master):
@@ -146,6 +148,8 @@ class PaintApp:
         edit_menu = Menu(menu, tearoff=False)
         menu.add_cascade(label="Edit", menu=edit_menu)
         edit_menu.add_command(label="Set Grid Size", command=self.set_grid_size)
+        edit_menu.add_command(label="Set Map Description", command=self.set_map_desc)
+        
 
     def select_tile(self, index, button):
         if self.selected_tile == index:
@@ -201,7 +205,8 @@ class PaintApp:
         if self.tile_grid[v2_[0]][v2_[1]] == self.selected_tile:
             return
 
-        self.canvas.create_image(*v2, image=self.icons[self.selected_tile])
+        self.canvas.delete(f"{v2_[0]},{v2_[1]}")
+        self.canvas.create_image(*v2, image=self.icons[self.selected_tile], tags=f"{v2_[0]},{v2_[1]}")
         self.canvas.update()
         
         # Update the tile_grid
@@ -209,6 +214,27 @@ class PaintApp:
             self.tile_grid[v2_[0]][v2_[1]] = self.selected_tile
         except IndexError:
             pass
+
+    def set_map_desc(self):
+        paint_app = self
+
+        class GridSizeDialog(simpledialog.Dialog):
+            def body(self, master):
+                self.desc_label = Label(master, text="Description:")
+                self.desc_label.grid(row=0, column=0, pady=5, padx=5)
+                self.desc = Text(master, width=50, height=10)
+                self.desc.grid(row=1, column=0, pady=5, padx=5)
+                self.desc.focus_set()
+                self.desc.insert(tk.END, paint_app.map_desc)
+                # self.desc.insert(0, str(paint_app.grid_size[0]))
+
+                return self.desc
+
+            def apply(self):
+                desc = self.desc.get("1.0", tk.END)
+                paint_app.map_desc = desc or ""
+
+        GridSizeDialog(self.master)
 
     def set_grid_size(self):
         paint_app = self
@@ -272,7 +298,7 @@ class PaintApp:
                 x = x_ini - j * self.half_cell_size
                 y = y_ini + j * self.half_cell_size
                 
-                self.canvas.create_image(x, y, image=self.icons[cell_tile_index])
+                self.canvas.create_image(x, y, image=self.icons[cell_tile_index], tags=f"{x},{y}")
 
     def start_pan(self, event):
         self.pan_start_x = event.x
@@ -296,7 +322,7 @@ class PaintApp:
             return
         with open(filename, mode="w", newline="") as file:
             writer = csv.writer(file)
-            writer.writerow([''] + [f'X{x}' for x in range(1,self.grid_size[0]+1)])
+            writer.writerow([self.map_desc] + [f'X{x}' for x in range(1,self.grid_size[0]+1)])
             for i,row in enumerate(self.tile_grid, 1):
                 writer.writerow([f'Y{i}'] + row)
 
@@ -308,11 +334,12 @@ class PaintApp:
             return
         with open(filename, newline="") as file:
             reader = csv.reader(file, delimiter=",")
-            rows = list(reader)[1:]
-            self.update_grid_size(len(rows[0])- 1, len(rows))
+            rows = list(reader)
+            self.map_desc = rows[0][0]
+            self.update_grid_size(len(rows[0])- 1, len(rows) - 1)
             x_ini = self.grid_size[0] * self.half_cell_size
             y_ini = self.half_cell_size
-            for i, row in enumerate(rows):
+            for i, row in enumerate(rows[1:]):
                 x_ini += self.half_cell_size 
                 y_ini += self.half_cell_size
                 for j, cell_tile_index in enumerate(row[1:]):
